@@ -1,0 +1,10 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "paths": {
+      "expo-media-analyzer": ["../src/index"],
+      "expo-media-analyzer/*": ["../src/*"]
+    }
+  }
+}

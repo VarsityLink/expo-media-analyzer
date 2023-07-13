@@ -1,0 +1,9 @@
+{
+  "platforms": ["ios", "android", "web"],
+  "ios": {
+    "modules": ["ExpoMediaAnalyzerModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.mediaanalyzer.ExpoMediaAnalyzerModule"]
+  }
+}
