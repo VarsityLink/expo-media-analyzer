@@ -1,44 +1,75 @@
 import ExpoModulesCore
+import Foundation
+import AVFoundation
 
 public class ExpoMediaAnalyzerModule: Module {
-  // Each module class must implement the definition function. The definition consists of components
-  // that describes the module's functionality and behavior.
-  // See https://docs.expo.dev/modules/module-api for more details about available components.
+  private func codecForVideoAsset(asset: AVAsset, mediaType: CMMediaType) -> String? {
+    let formatDescriptions = asset.tracks.flatMap { $0.formatDescriptions }
+    let mediaSubtypes = formatDescriptions
+      .filter { CMFormatDescriptionGetMediaType($0 as! CMFormatDescription) == mediaType }
+      .map { CMFormatDescriptionGetMediaSubType($0 as! CMFormatDescription).toString() }
+    return mediaSubtypes.first
+  }
   public func definition() -> ModuleDefinition {
-    // Sets the name of the module that JavaScript code will use to refer to the module. Takes a string as an argument.
-    // Can be inferred from module's class name, but it's recommended to set it explicitly for clarity.
-    // The module will be accessible from `requireNativeModule('ExpoMediaAnalyzer')` in JavaScript.
     Name("ExpoMediaAnalyzer")
 
-    // Sets constant properties on the module. Can take a dictionary or a closure that returns a dictionary.
-    Constants([
-      "PI": Double.pi
-    ])
+    AsyncFunction("analyze") { (uri: String, promise: Promise) -> Any in
+      do {
+        let mediaAssetUrl = try URL(fileURLWithPath: String(uri))
+        let mediaAsset: AVAsset = AVAsset(url: mediaAssetUrl)
+        let mediaAssetVideoTracks = mediaAsset.tracks(withMediaType: AVMediaType.video)
+        let mediaAssetAudioTracks = mediaAsset.tracks(withMediaType: AVMediaType.audio)
+        let videoInfo: NSMutableDictionary = NSMutableDictionary()
+        let audioInfo: NSMutableDictionary = NSMutableDictionary()
 
-    // Defines event names that the module can send to JavaScript.
-    Events("onChange")
+        if(mediaAssetVideoTracks.count > 0){
+          let videoTrack = mediaAssetVideoTracks[0]
+          let transformedVideoSize = videoTrack.naturalSize.applying(videoTrack.preferredTransform)
+          let videoIsPortrait = abs(transformedVideoSize.width) < abs(transformedVideoSize.height)
+          videoInfo["codec"] = codecForVideoAsset(asset: mediaAsset, mediaType: kCMMediaType_Video)
+          videoInfo["bitrate"] = videoTrack.estimatedDataRate
+          videoInfo["frameRate"] = videoTrack.nominalFrameRate
+          videoInfo["width"] = videoTrack.naturalSize.width
+          videoInfo["height"] = videoTrack.naturalSize.height
+          videoInfo["rotation"] = videoIsPortrait ? 90 : 0
+          videoInfo["duration"] = mediaAsset.duration.seconds
+        }
 
-    // Defines a JavaScript synchronous function that runs the native code on the JavaScript thread.
-    Function("hello") {
-      return "Hello world! 👋"
-    }
+        if(mediaAssetAudioTracks.count > 0){
+          let audioTrack = mediaAssetAudioTracks[0]
+          let audioTrackDescriptions = audioTrack.formatDescriptions as! [CMFormatDescription]
+          audioInfo["codec"] = codecForVideoAsset(asset: mediaAsset, mediaType: kCMMediaType_Audio)
+          audioInfo["bitrate"] = audioTrack.estimatedDataRate
+          for item in (audioTrackDescriptions) {
+            let basic = CMAudioFormatDescriptionGetStreamBasicDescription(item)
+            audioInfo["sampleRate"] = basic?.pointee.mSampleRate
+            audioInfo["channels"] = basic?.pointee.mChannelsPerFrame
+          }
+        }
 
-    // Defines a JavaScript function that always returns a Promise and whose native code
-    // is by default dispatched on the different thread than the JavaScript runtime runs on.
-    AsyncFunction("setValueAsync") { (value: String) in
-      // Send an event to JavaScript.
-      self.sendEvent("onChange", [
-        "value": value
-      ])
-    }
-
-    // Enables the module to be used as a native view. Definition components that are accepted as part of the
-    // view definition: Prop, Events.
-    View(ExpoMediaAnalyzerView.self) {
-      // Defines a setter for the `name` prop.
-      Prop("name") { (view: ExpoMediaAnalyzerView, prop: String) in
-        print(prop)
+        let mapInfo: NSMutableDictionary = NSMutableDictionary()
+        mapInfo["video"] = videoInfo
+        mapInfo["audio"] = audioInfo
+        return promise.resolve(mapInfo)
+      } catch {
+        return promise.resolve(nil)
       }
     }
+  }
+}
+
+extension FourCharCode {
+  // Create a string representation of a FourCC.
+  func toString() -> String {
+    let bytes: [CChar] = [
+      CChar((self >> 24) & 0xff),
+      CChar((self >> 16) & 0xff),
+      CChar((self >> 8) & 0xff),
+      CChar(self & 0xff),
+      0
+    ]
+    let result = String(cString: bytes)
+    let characterSet = CharacterSet.whitespaces
+    return result.trimmingCharacters(in: characterSet)
   }
 }

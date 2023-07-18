@@ -2,46 +2,70 @@ package expo.modules.mediaanalyzer
 
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import expo.modules.kotlin.Promise
+
+import android.media.MediaExtractor
+import android.media.MediaFormat
+import android.media.MediaMetadataRetriever
+
 
 class ExpoMediaAnalyzerModule : Module() {
-  // Each module class must implement the definition function. The definition consists of components
-  // that describes the module's functionality and behavior.
-  // See https://docs.expo.dev/modules/module-api for more details about available components.
   override fun definition() = ModuleDefinition {
-    // Sets the name of the module that JavaScript code will use to refer to the module. Takes a string as an argument.
-    // Can be inferred from module's class name, but it's recommended to set it explicitly for clarity.
-    // The module will be accessible from `requireNativeModule('ExpoMediaAnalyzer')` in JavaScript.
     Name("ExpoMediaAnalyzer")
 
-    // Sets constant properties on the module. Can take a dictionary or a closure that returns a dictionary.
-    Constants(
-      "PI" to Math.PI
-    )
-
-    // Defines event names that the module can send to JavaScript.
-    Events("onChange")
-
-    // Defines a JavaScript synchronous function that runs the native code on the JavaScript thread.
-    Function("hello") {
-      "Hello world! 👋"
+    AsyncFunction("analyze") { videoUri: String, promise: Promise ->
+      analyze(videoUri, promise)
     }
+  }
 
-    // Defines a JavaScript function that always returns a Promise and whose native code
-    // is by default dispatched on the different thread than the JavaScript runtime runs on.
-    AsyncFunction("setValueAsync") { value: String ->
-      // Send an event to JavaScript.
-      sendEvent("onChange", mapOf(
-        "value" to value
-      ))
-    }
+  private fun analyze(videoUri: String, promise: Promise): Any {
+    try {
+      val videoInfo = HashMap<String, Any>()
+      val audioInfo = HashMap<String, Any>()
+      var retriever = MediaMetadataRetriever()
 
-    // Enables the module to be used as a native view. Definition components that are accepted as part of
-    // the view definition: Prop, Events.
-    View(ExpoMediaAnalyzerView::class) {
-      // Defines a setter for the `name` prop.
-      Prop("name") { view: ExpoMediaAnalyzerView, prop: String ->
-        println(prop)
+      retriever.setDataSource(videoUri)
+      videoInfo.put("format", retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_MIMETYPE) ?: "")
+      videoInfo.put("bitrate",
+              Integer.parseInt(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)))
+      videoInfo.put("rotation",
+              Integer.parseInt(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)))
+      retriever.release()
+
+      val extractor = MediaExtractor()
+      extractor.setDataSource(videoUri)
+      val numTracks: Int = extractor.getTrackCount()
+      var i = 0
+
+      repeat(numTracks) {
+        val format = extractor.getTrackFormat(i)
+        val mime = format.getString(MediaFormat.KEY_MIME)
+
+        if (mime?.startsWith("video") as Boolean) {
+          videoInfo.put("codec", mime.replace("video/", ""));
+          videoInfo.put("width", format.getInteger(MediaFormat.KEY_WIDTH))
+          videoInfo.put("height", format.getInteger(MediaFormat.KEY_HEIGHT))
+          videoInfo.put("frameRate", format.getInteger(MediaFormat.KEY_FRAME_RATE))
+          videoInfo.put("duration", format.getLong(MediaFormat.KEY_DURATION)/1000000);
+        } else if (mime?.startsWith("audio") as Boolean) {
+          audioInfo.put("codec", mime.replace("audio/", ""))
+          audioInfo.put("bitrate", format.getInteger(MediaFormat.KEY_BIT_RATE))
+          audioInfo.put("sampleRate", format.getInteger(MediaFormat.KEY_SAMPLE_RATE))
+          audioInfo.put("channels", format.getInteger(MediaFormat.KEY_CHANNEL_COUNT))
+        }
+
+        i = i + 1
       }
+
+      extractor.release()
+      
+      val infoMap = HashMap<String, Any>()
+      infoMap.put("video", videoInfo)
+      infoMap.put("audio", audioInfo)
+      return promise.resolve(infoMap)
+    }
+    catch(e: Exception) {
+      return promise.resolve(null)
     }
   }
 }
